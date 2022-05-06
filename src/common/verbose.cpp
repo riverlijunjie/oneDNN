@@ -198,7 +198,9 @@ int verbose_debuginfo() {
     return get_verbose() >> 24;
 }
 
+#if !defined(DISABLE_VERBOSE)
 static setting_t<bool> verbose_timestamp {false};
+#endif
 bool get_verbose_timestamp() {
 #if defined(DISABLE_VERBOSE)
     return false;
