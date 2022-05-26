@@ -16,6 +16,7 @@
 *******************************************************************************/
 
 #include <mutex>
+#include <iostream>
 
 #include "common/utils.hpp"
 #include "common/verbose.hpp"
@@ -58,6 +59,7 @@ void dump_jit_code(const void *code, size_t code_size, const char *code_name) {
                 counter);
         counter++;
 
+        std::cout << "[ oneDNN ] dump_jit_code: " << fname << std::endl;
         FILE *fp = fopen(fname, "wb+");
         // Failure to dump code is not fatal
         if (fp) {
@@ -129,6 +131,9 @@ void register_jit_code(const void *code, size_t code_size,
     static std::mutex m;
     std::lock_guard<std::mutex> guard(m);
 
+    if (code && get_jit_dump()) {
+        std::cout << "[ oneDNN ] register_jit_code: " << source_file_name << ", " << code_name << std::endl;
+    }
     dump_jit_code(code, code_size, code_name);
     register_jit_code_vtune(code, code_size, code_name, source_file_name);
     register_jit_code_linux_perf(code, code_size, code_name, source_file_name);
