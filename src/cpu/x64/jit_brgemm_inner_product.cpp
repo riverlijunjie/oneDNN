@@ -120,6 +120,10 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
                     key_conv_amx_tile_buffer)
             : nullptr;
 
+    auto decomp_buf_global = (jbgp.weights_compressed)
+            ? scratchpad.template get<char>(key_brgemm_primitive_decomp_buf)
+            : nullptr;
+
     const int ic_chunks = div_up(jbgp.nb_ic, jbgp.nb_ic_blocking);
 
     const bool are_post_ops_applicable = one_of(true, jbgp.with_sum,
@@ -217,9 +221,29 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
                                 + get_blk_off(src_d, jbgp.src_dt, n,
                                         ic + b * jbgp.K));
                 addr_batch[b].ptr.A = A_ptr;
-                addr_batch[b].ptr.B = weights
-                        + get_blk_off(weights_d, jbgp.wei_dt, ocb,
-                                icb + b * ic_blocks_per_batch);
+                auto wei_offset
+                        = get_blk_off(weights_d, jbgp.wei_dt, ocb, icb + b * ic_blocks_per_batch);
+                if (jbgp.weights_compressed) {
+                    const int16_t *compressed_tile_lengths_ptr
+                            = reinterpret_cast<const int16_t *>(weights);
+                    int compressed_weights_offset = wei_offset / 4096;
+
+                    auto dcomp_params = brgemm_decomp_kernel_params_t();
+                    dcomp_params.ptr_B = weights + jbgp.weights_starting_offset
+                            + compressed_tile_lengths_ptr
+                                            [compressed_weights_offset]
+                                    * 64;
+                    dcomp_params.bitmask_ptr
+                            = weights + jbgp.weight_comp_bitmask_off + wei_offset / 8;
+                    const size_t decomp_buf_per_thr = (size_t)jbgp.ic * 64;
+                    auto decomp_buf = decomp_buf_global + ithr * decomp_buf_per_thr;
+
+                    dcomp_params.scratch_buf = decomp_buf;
+                    (*brg_decomp_kernel_)(&dcomp_params);
+                    addr_batch[b].ptr.B = decomp_buf;
+                } else {
+                    addr_batch[b].ptr.B = weights + wei_offset;
+                }
             }
 
             auto ptr_D = dst + dst_off;
@@ -406,6 +430,7 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
                 nd_iterator_init(start, occ, oc_chunks, osc, os_chunks);
                 break;
         }
+
         while (start < end) {
             int ocb_s = occ * jbgp.nb_oc_blocking;
             int ocb_e = nstl::min(ocb_s + jbgp.nb_oc_blocking, jbgp.nb_oc);
@@ -614,7 +639,6 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
             }
         });
     }
-
     return status::success;
 }
 
