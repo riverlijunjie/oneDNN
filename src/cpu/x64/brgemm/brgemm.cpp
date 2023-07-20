@@ -221,7 +221,7 @@ status_t brdgmm_desc_init(brgemm_t *brg, cpu_isa_t isa,
 }
 
 status_t brgemm_desc_set_postops(brgemm_t *brg, const primitive_attr_t *attr,
-        const memory_desc_t *dst_md, int LDD, impl::data_type_t dt_bias) {
+        const memory_desc_t *dst_md, int LDD, impl::data_type_t dt_bias, bool is_weights_decompression) {
     if (!brg || !dst_md) return status::invalid_arguments;
 
     brg->attr = attr;
@@ -330,7 +330,7 @@ status_t brgemm_desc_set_postops(brgemm_t *brg, const primitive_attr_t *attr,
     const auto &src_scales = attr->scales_.get(DNNL_ARG_SRC);
     const auto &wei_scales = attr->scales_.get(DNNL_ARG_WEIGHTS);
     brg->with_scales = !src_scales.has_default_values()
-            || !wei_scales.has_default_values()
+            || (!wei_scales.has_default_values() && !is_weights_decompression)
             || brg->with_weights_scale_adjust;
     if (brg->with_scales) {
         // Note. the current version supports only two different output scale

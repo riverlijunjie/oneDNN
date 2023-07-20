@@ -116,7 +116,7 @@ status_t DNNL_API brdgmm_desc_init(brgemm_t *brg, cpu_isa_t isa,
 ///
 status_t DNNL_API brgemm_desc_set_postops(brgemm_t *brg,
         const primitive_attr_t *attr, const memory_desc_t *dst_md, int LDD,
-        impl::data_type_t dt_bias = impl::data_type::undef);
+        impl::data_type_t dt_bias = impl::data_type::undef, bool is_weights_decompression = false);
 
 /// Adds BRGEMM attributes to BRGEMM descriptor
 ///

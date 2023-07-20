@@ -1262,7 +1262,9 @@ status_t jit_brgemm_ip_conf_t::init_conf_base(cpu_isa_t isa,
 
     jbgp.src_dt = src_d.data_type();
     jbgp.dst_dt = dst_d.data_type();
-    jbgp.wei_dt = weights_d.data_type();
+    jbgp.orig_wei_dt =  weights_d.data_type();
+    jbgp.weights_decompression = jbgp.src_dt == f32 && jbgp.orig_wei_dt == u8;
+    jbgp.wei_dt = jbgp.weights_decompression ? jbgp.src_dt : jbgp.orig_wei_dt;
     jbgp.bia_dt = jbgp.with_bias
             ? pick_by_prop_kind(jbgp.prop_kind, ipd.bias_desc.data_type,
                     data_type::undef, ipd.diff_bias_desc.data_type)
@@ -1437,6 +1439,15 @@ void jit_brgemm_ip_conf_t::init_scratchpad_base(
         scratchpad.book(key_brgemm_primitive_decomp_buf,
                 (size_t)jbgp.nthr * jbgp.ic * 64,
                 types::data_type_size(jbgp.wei_dt));
+
+    if (jbgp.weights_decompression) {
+        scratchpad.book(key_brgemm_primitive_decomp_buf,
+                (size_t)jbgp.nthr * jbgp.ic_block * jbgp.nb_ic_blocking * jbgp.oc_block,
+                types::data_type_size(jbgp.wei_dt));
+
+        scratchpad.book(key_decompression_scales, rnd_up(jbgp.oc, jbgp.oc_block), sizeof(float));
+        scratchpad.book(key_decompression_zero_points, rnd_up(jbgp.oc, jbgp.oc_block), sizeof(float));
+    }
 }
 
 void jit_brgemm_ip_fwd_conf_t::init_scratchpad(

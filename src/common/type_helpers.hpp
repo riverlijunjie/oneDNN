@@ -284,6 +284,7 @@ inline data_type_t default_accum_data_type(data_type_t src_dt,
 
     /* prop_kind doesn't matter */
     if (everyone_is(f32, src_dt, wei_dt)) return f32;
+    if (src_dt == f32 && wei_dt == u8) return f32;
     if (everyone_is(f64, src_dt, wei_dt)) return f64;
 
     if (one_of(prop_kind, forward_training, forward_inference)) {

@@ -81,8 +81,32 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
     DEFINE_ARG_SCALES_BUFFER(wei_scales, DNNL_ARG_WEIGHTS);
     DEFINE_ARG_SCALES_BUFFER(dst_scales, DNNL_ARG_DST);
 
-    const float *oscales = precompute_scales(ctx.get_scratchpad_grantor(),
+    DEFINE_ZERO_POINTS_BUFFER_TYPED(wei_zero_points, DNNL_ARG_WEIGHTS, float);
+
+    const float *oscales = nullptr;
+    if (jbgp.weights_decompression) {
+        // weights decompression algorithm requires weights scales to be
+        // applied before matmul to avoid huge numerical errors
+        oscales = src_scales;
+
+        // decompression algorithm assumes scales/zero_points buffers are aligned on oc_block size
+        if (jbgp.oc % jbgp.oc_block != 0) {
+            if (!pd()->attr()->scales_.get(DNNL_ARG_WEIGHTS).has_default_values()) {
+                auto decomp_scales_buf = scratchpad.template get<float>(key_decompression_scales);
+                std::memcpy(decomp_scales_buf, wei_scales, jbgp.oc * sizeof(float));
+                wei_scales = decomp_scales_buf;
+            }
+
+            if (!pd()->attr()->zero_points_.has_default_values(DNNL_ARG_WEIGHTS)) {
+                auto decomp_zp_buf = scratchpad.template get<float>(key_decompression_zero_points);
+                std::memcpy(decomp_zp_buf, wei_zero_points, jbgp.oc * sizeof(float));
+                wei_zero_points = decomp_zp_buf;
+            }
+        }
+    } else {
+        oscales = precompute_scales(ctx.get_scratchpad_grantor(),
             src_scales, wei_scales, pd()->OC(), pd()->attr());
+    }
 
     const size_t src_dt_size = types::data_type_size(jbgp.src_dt);
     const size_t bia_dt_size
@@ -104,7 +128,7 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
                     key_conv_amx_tile_buffer)
             : nullptr;
 
-    auto decomp_buf_global = (jbgp.weights_compressed)
+    auto decomp_buf_global = (jbgp.weights_compressed || jbgp.weights_decompression)
             ? scratchpad.template get<char>(key_brgemm_primitive_decomp_buf)
             : nullptr;
 
@@ -267,6 +291,26 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
                     dcomp_params.scratch_buf = decomp_buf;
                     (*brg_decomp_kernel_)(&dcomp_params);
                     addr_batch[b].ptr.B = decomp_buf;
+                } else if (jbgp.weights_decompression) {
+                    auto w_off = wei_offset * types::data_type_size(jbgp.orig_wei_dt) / types::data_type_size(jbgp.wei_dt);
+                    auto weights_ptr = reinterpret_cast<const uint8_t *>(&weights[w_off]);
+
+                    const size_t decomp_buf_per_thr = jbgp.ic_block * jbgp.nb_ic_blocking * jbgp.oc_block * types::data_type_size(jbgp.wei_dt);
+                    auto decomp_buf = decomp_buf_global + ithr * decomp_buf_per_thr + wei_ic_stride * b * ic_blocks_per_batch;
+                    auto decomp_buf_ptr = reinterpret_cast<float *>(decomp_buf);
+
+                    auto wei_zero_points_ptr = wei_zero_points + oc;
+                    auto wei_scales_ptr = wei_scales + oc;
+
+                    weights_decompression_runtime_params_t rt_params = {};
+                    rt_params.weights_ptr = weights_ptr;
+                    rt_params.decomp_buffer_ptr = decomp_buf_ptr;
+                    rt_params.scales_ptr = wei_scales_ptr;
+                    rt_params.zero_points_ptr = wei_zero_points_ptr;
+                    rt_params.ic_size = jbgp.ic_block * ic_blocks_per_batch;
+                    (*brg_weights_decomp_kernel_)(&rt_params);
+
+                    addr_batch[b].ptr.B = decomp_buf_ptr;
                 } else {
                     addr_batch[b].ptr.B = weights + wei_offset;
                 }
@@ -315,7 +359,30 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
                             ic + ic_block * jbgp.ic_block);
             const dim_t wei_offset
                     = wei_cur_ocb + wei_ic_stride * (icb + ic_block);
-            addr_batch[0].ptr.B = weights + wei_offset;
+
+            if (jbgp.weights_decompression) {
+                auto w_off = wei_offset * types::data_type_size(jbgp.orig_wei_dt) / types::data_type_size(jbgp.wei_dt);
+                auto weights_ptr = reinterpret_cast<const uint8_t *>(&weights[w_off]);
+
+                const size_t decomp_buf_per_thr = jbgp.ic_block * jbgp.nb_ic_blocking * jbgp.oc_block * types::data_type_size(jbgp.wei_dt);
+                auto decomp_buf = decomp_buf_global + ithr * decomp_buf_per_thr;
+                auto decomp_buf_ptr = reinterpret_cast<float *>(decomp_buf);
+
+                auto wei_zero_points_ptr = wei_zero_points + oc;
+                auto wei_scales_ptr = wei_scales + oc;
+
+                weights_decompression_runtime_params_t rt_params = {};
+                rt_params.weights_ptr = weights_ptr;
+                rt_params.decomp_buffer_ptr = decomp_buf_ptr;
+                rt_params.scales_ptr = wei_scales_ptr;
+                rt_params.zero_points_ptr = wei_zero_points_ptr;
+                rt_params.ic_size = jbgp.ic - (ic + ic_block * jbgp.ic_block);
+                (*brg_weights_decomp_kernel_)(&rt_params);
+
+                addr_batch[0].ptr.B = decomp_buf_ptr;
+            } else {
+                addr_batch[0].ptr.B = weights + wei_offset;
+            }
 
             auto brg_kernel_ic_tail = brg_kernels_[brg_ker_ic_tail_idx].get();
             auto ptr_D = dst + dst_off;

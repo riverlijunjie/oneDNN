@@ -87,6 +87,9 @@ struct jit_brgemm_primitive_conf_t {
     brgemm_kernel_prefetching_t hint_prefetching
             = brgemm_kernel_prefetching_t::brgemm_prf_default;
     bool with_dst_scales;
+
+    data_type_t orig_wei_dt;
+    bool weights_decompression;
 };
 
 } // namespace x64

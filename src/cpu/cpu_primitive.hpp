@@ -86,15 +86,18 @@
 #define DEFINE_ARG_SCALES_BUFFER(scales, arg) \
     DEFINE_ARG_SCALES_BUFFER_ATTR(pd()->attr(), scales, arg)
 
-#define DEFINE_ZERO_POINTS_BUFFER(zero_points_ptr, mem_arg) \
-    int32_t CONCAT2(default_zero_point_, mem_arg) = 0; \
-    const int32_t *zero_points_ptr \
+#define DEFINE_ZERO_POINTS_BUFFER_TYPED(zero_points_ptr, mem_arg, type) \
+    type CONCAT2(default_zero_point_, mem_arg) = 0; \
+    const type *zero_points_ptr \
             = pd()->attr()->zero_points_.defined(mem_arg) \
             ? &CONCAT2(default_zero_point_, mem_arg) \
             : CTX_IN_MEM( \
-                    const int32_t *, DNNL_ARG_ATTR_ZERO_POINTS | mem_arg); \
+                    const type *, DNNL_ARG_ATTR_ZERO_POINTS | mem_arg); \
     if (zero_points_ptr == nullptr) return status::invalid_arguments; \
     MAYBE_UNUSED(zero_points_ptr);
+
+#define DEFINE_ZERO_POINTS_BUFFER(zero_points_ptr, mem_arg) \
+    DEFINE_ZERO_POINTS_BUFFER_TYPED(zero_points_ptr, mem_arg, int32_t)
 
 #define ASSIGN_ARG_SCALE_VALUE(scale, mem_arg) \
     alignas(16) float CONCAT2(CONCAT2(scales, _buf16), mem_arg)[16] = {0}; \
