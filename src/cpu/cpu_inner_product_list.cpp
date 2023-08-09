@@ -73,6 +73,14 @@ const std::map<pk_dt_impl_key_t, std::vector<impl_list_item_t>> &impl_list_map()
             CPU_INSTANCE(ref_inner_product_fwd_t)
             nullptr,
         }},
+        {{forward, bf16, u8, f32}, {
+            CPU_INSTANCE_AMX(brgemm_inner_product_fwd_t, avx512_core_amx)
+            nullptr,
+        }},
+        {{forward, bf16, u8, bf16}, {
+            CPU_INSTANCE_AMX(brgemm_inner_product_fwd_t, avx512_core_amx)
+            nullptr,
+        }},
         {{forward, f16, f16, f32}, {
             CPU_INSTANCE_AMX(brgemm_inner_product_fwd_t, avx512_core_amx_fp16)
             CPU_INSTANCE_AVX512(brgemm_inner_product_fwd_t, avx512_core_fp16)

@@ -1263,7 +1263,7 @@ status_t jit_brgemm_ip_conf_t::init_conf_base(cpu_isa_t isa,
     jbgp.src_dt = src_d.data_type();
     jbgp.dst_dt = dst_d.data_type();
     jbgp.orig_wei_dt =  weights_d.data_type();
-    jbgp.weights_decompression = jbgp.src_dt == f32 && jbgp.orig_wei_dt == u8;
+    jbgp.weights_decompression = one_of(jbgp.src_dt, f32, bf16) && jbgp.orig_wei_dt == u8;
     jbgp.wei_dt = jbgp.weights_decompression ? jbgp.src_dt : jbgp.orig_wei_dt;
     jbgp.bia_dt = jbgp.with_bias
             ? pick_by_prop_kind(jbgp.prop_kind, ipd.bias_desc.data_type,
@@ -1445,8 +1445,10 @@ void jit_brgemm_ip_conf_t::init_scratchpad_base(
                 (size_t)jbgp.nthr * jbgp.ic_block * jbgp.nb_ic_blocking * jbgp.oc_block,
                 types::data_type_size(jbgp.wei_dt));
 
-        scratchpad.book(key_decompression_scales, rnd_up(jbgp.oc, jbgp.oc_block), sizeof(float));
-        scratchpad.book(key_decompression_zero_points, rnd_up(jbgp.oc, jbgp.oc_block), sizeof(float));
+        size_t ic_internal_size = jbgp.is_amx ? 2 : 1;
+        size_t buf_size = rnd_up(jbgp.oc, jbgp.oc_block) * ic_internal_size;
+        scratchpad.book(key_decompression_scales, buf_size, sizeof(float));
+        scratchpad.book(key_decompression_zero_points, buf_size, sizeof(float));
     }
 }
 

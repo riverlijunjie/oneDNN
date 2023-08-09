@@ -56,6 +56,8 @@ void jit_brgemm_weights_decompression_kernel_t<isa>::generate() {
     Xbyak::Label ic_loop_label;
     Xbyak::Label ic_end_label;
 
+    size_t decomp_buf_dt_size = types::data_type_size(jcp_.decomp_buffer_dt);
+
     L(ic_loop_label);
     {
         cmp(reg_ic_size, 1);
@@ -68,12 +70,25 @@ void jit_brgemm_weights_decompression_kernel_t<isa>::generate() {
                 uni_vsubps(vmm_weights(ocb), vmm_weights(ocb), vmm_zero_points(ocb));
             if (jcp_.with_scales)
                 uni_vmulps(vmm_weights(ocb), vmm_weights(ocb), vmm_scales(ocb));
-            uni_vmovups(ptr[reg_decomp_buffer + ocb * vec_size * sizeof(float)], vmm_weights(ocb));
+
+            switch (jcp_.decomp_buffer_dt) {
+                case data_type::f32: {
+                    uni_vmovups(ptr[reg_decomp_buffer + ocb * vec_size * decomp_buf_dt_size], vmm_weights(ocb));
+                    break;
+                }
+                case data_type::bf16: {
+                    Ymm ymm_weights = Ymm(vmm_weights(ocb).getIdx());
+                    vcvtneps2bf16(ymm_weights, vmm_weights(ocb));
+                    vmovdqu16(ptr[reg_decomp_buffer + ocb * vec_size * decomp_buf_dt_size], ymm_weights);
+                    break;
+                }
+                default: assert(!"unsupported data type");
+            }
         }
 
         dec(reg_ic_size);
         add(reg_weights, sizeof(uint8_t) * jcp_.oc_size);
-        add(reg_decomp_buffer, sizeof(float) * jcp_.oc_size);
+        add(reg_decomp_buffer, decomp_buf_dt_size * jcp_.oc_size);
 
         jmp(ic_loop_label, T_NEAR);
     }

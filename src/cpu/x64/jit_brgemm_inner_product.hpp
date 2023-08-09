@@ -60,7 +60,7 @@ struct brgemm_inner_product_fwd_t : public primitive_t {
             auto dst_dt = invariant_dst_md()->data_type;
             auto wei_dt = invariant_wei_md()->data_type;
             const bool is_int8 = one_of(src_dt, u8, s8);
-            const bool is_wei_decomp = src_dt == f32 && wei_dt == u8;
+            const bool is_wei_decomp = one_of(src_dt, f32, bf16) && wei_dt == u8;
 
             using skip_mask_t = primitive_attr_t::skip_mask_t;
             auto skip_mask = skip_mask_t::post_ops | skip_mask_t::sum_dt;
@@ -208,9 +208,11 @@ struct brgemm_inner_product_fwd_t : public primitive_t {
 
         if (pd()->jbgp_.weights_decompression) {
             weights_decompression_compile_params_t jcp = {};
-            jcp.oc_size = pd()->jbgp_.oc_block;
+            const int ic_internal_block = pd()->jbgp_.is_amx ? 2 : 1;
+            jcp.oc_size = pd()->jbgp_.oc_block * ic_internal_block;
             jcp.with_scales = !pd()->attr()->scales_.get(DNNL_ARG_WEIGHTS).has_default_values();
             jcp.with_zero_points = !pd()->attr()->zero_points_.has_default_values(DNNL_ARG_WEIGHTS);
+            jcp.decomp_buffer_dt = pd()->jbgp_.wei_dt;
 
             if (mayiuse(avx512_core)) {
                 CHECK(safe_ptr_assign(brg_weights_decomp_kernel_,

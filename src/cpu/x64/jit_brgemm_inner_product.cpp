@@ -91,15 +91,16 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
 
         // decompression algorithm assumes scales/zero_points buffers are aligned on oc_block size
         if (jbgp.oc % jbgp.oc_block != 0) {
+            int ic_internal_block = jbgp.is_amx ? 2 : 1;
             if (!pd()->attr()->scales_.get(DNNL_ARG_WEIGHTS).has_default_values()) {
                 auto decomp_scales_buf = scratchpad.template get<float>(key_decompression_scales);
-                std::memcpy(decomp_scales_buf, wei_scales, jbgp.oc * sizeof(float));
+                std::memcpy(decomp_scales_buf, wei_scales, ic_internal_block * jbgp.oc * sizeof(float));
                 wei_scales = decomp_scales_buf;
             }
 
             if (!pd()->attr()->zero_points_.has_default_values(DNNL_ARG_WEIGHTS)) {
                 auto decomp_zp_buf = scratchpad.template get<float>(key_decompression_zero_points);
-                std::memcpy(decomp_zp_buf, wei_zero_points, jbgp.oc * sizeof(float));
+                std::memcpy(decomp_zp_buf, wei_zero_points, ic_internal_block * jbgp.oc * sizeof(float));
                 wei_zero_points = decomp_zp_buf;
             }
         }
@@ -297,20 +298,20 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
 
                     const size_t decomp_buf_per_thr = jbgp.ic_block * jbgp.nb_ic_blocking * jbgp.oc_block * types::data_type_size(jbgp.wei_dt);
                     auto decomp_buf = decomp_buf_global + ithr * decomp_buf_per_thr + wei_ic_stride * b * ic_blocks_per_batch;
-                    auto decomp_buf_ptr = reinterpret_cast<float *>(decomp_buf);
 
-                    auto wei_zero_points_ptr = wei_zero_points + oc;
-                    auto wei_scales_ptr = wei_scales + oc;
+                    const int ic_internal_block = is_amx ? 2 : 1;
+                    auto wei_zero_points_ptr = wei_zero_points + oc * ic_internal_block;
+                    auto wei_scales_ptr = wei_scales + oc * ic_internal_block;
 
                     weights_decompression_runtime_params_t rt_params = {};
                     rt_params.weights_ptr = weights_ptr;
-                    rt_params.decomp_buffer_ptr = decomp_buf_ptr;
+                    rt_params.decomp_buffer_ptr = decomp_buf;
                     rt_params.scales_ptr = wei_scales_ptr;
                     rt_params.zero_points_ptr = wei_zero_points_ptr;
-                    rt_params.ic_size = jbgp.ic_block * ic_blocks_per_batch;
+                    rt_params.ic_size = jbgp.ic_block * ic_blocks_per_batch / ic_internal_block;
                     (*brg_weights_decomp_kernel_)(&rt_params);
 
-                    addr_batch[b].ptr.B = decomp_buf_ptr;
+                    addr_batch[b].ptr.B = decomp_buf;
                 } else {
                     addr_batch[b].ptr.B = weights + wei_offset;
                 }
@@ -366,20 +367,20 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
 
                 const size_t decomp_buf_per_thr = jbgp.ic_block * jbgp.nb_ic_blocking * jbgp.oc_block * types::data_type_size(jbgp.wei_dt);
                 auto decomp_buf = decomp_buf_global + ithr * decomp_buf_per_thr;
-                auto decomp_buf_ptr = reinterpret_cast<float *>(decomp_buf);
 
-                auto wei_zero_points_ptr = wei_zero_points + oc;
-                auto wei_scales_ptr = wei_scales + oc;
+                const int ic_internal_block = is_amx ? 2 : 1;
+                auto wei_zero_points_ptr = wei_zero_points + oc * ic_internal_block;
+                auto wei_scales_ptr = wei_scales + oc * ic_internal_block;
 
                 weights_decompression_runtime_params_t rt_params = {};
                 rt_params.weights_ptr = weights_ptr;
-                rt_params.decomp_buffer_ptr = decomp_buf_ptr;
+                rt_params.decomp_buffer_ptr = decomp_buf;
                 rt_params.scales_ptr = wei_scales_ptr;
                 rt_params.zero_points_ptr = wei_zero_points_ptr;
-                rt_params.ic_size = jbgp.ic - (ic + ic_block * jbgp.ic_block);
+                rt_params.ic_size = (jbgp.ic - (ic + ic_block * jbgp.ic_block)) / ic_internal_block;
                 (*brg_weights_decomp_kernel_)(&rt_params);
 
-                addr_batch[0].ptr.B = decomp_buf_ptr;
+                addr_batch[0].ptr.B = decomp_buf;
             } else {
                 addr_batch[0].ptr.B = weights + wei_offset;
             }

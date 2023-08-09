@@ -34,6 +34,8 @@ struct weights_decompression_compile_params_t {
     bool with_scales;
     bool with_zero_points;
     size_t oc_size;
+    size_t ic_internal_size;
+    data_type_t decomp_buffer_dt;
 };
 
 struct weights_decompression_runtime_params_t {
@@ -95,7 +97,7 @@ private:
 
     size_t vec_size;
 
-    static constexpr int unroll_factor = 4;
+    static constexpr int unroll_factor = isa == x64::avx512_core ? 8 : 4;
 };
 
 } // namespace x64
