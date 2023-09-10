@@ -39,6 +39,13 @@
 #include <asm/hwcap.h>
 #endif
 
+/* Linux kernel used in Ubuntu 20.04 does not have HWCAP2_BF16 definition. */
+#ifdef AT_HWCAP2
+#ifndef HWCAP2_BF16
+#define HWCAP2_BF16 (1UL << 14)
+#endif
+#endif
+
 namespace Xbyak_aarch64 {
 namespace util {
 #define XBYAK_AARCH64_ERROR_ fprintf(stderr, "%s, %d, Error occurrs during read cache infomation.\n", __FILE__, __LINE__);
@@ -66,6 +73,7 @@ public:
 private:
   static constexpr int max_path_len = 1024;
   static constexpr int buf_size = 1024;
+  const char *path_midr_el1 = "/sys/devices/system/cpu/cpu0/regs/identification/midr_el1";
   const struct cacheInfo_v2_t cacheInfoDict[2] = {{/* A64FX */ XBYAK_AARCH64_MIDR_EL1(0x46, 0x1, 0xf, 0x1, 0x0),
                                                    {{/* L1 */ SeparateCache, {1024 * 64, 1024 * 64, 0}, {1, 1, 0}},
                                                     {/* L2 */ UnifiedCache, {0, 0, 1024 * 1024 * 8}, {0, 0, 12}},
@@ -95,8 +103,6 @@ private:
     strncat(file_pattern, "[0-9]+", 16);
 
     DIR *dir = opendir(dir_path);
-    if (dir == NULL)
-      return 0;
     struct dirent *dp;
 
     dp = readdir(dir);
@@ -385,7 +391,7 @@ private:
   }
 
   void setHwCap() {
-    unsigned long hwcap = getauxval(AT_HWCAP);
+    const unsigned long hwcap = getauxval(AT_HWCAP);
     if (hwcap & HWCAP_ATOMICS)
       type_ |= (Type)XBYAK_AARCH64_HWCAP_ATOMIC;
 
@@ -393,8 +399,10 @@ private:
       type_ |= (Type)XBYAK_AARCH64_HWCAP_FP;
     if (hwcap & HWCAP_ASIMD)
       type_ |= (Type)XBYAK_AARCH64_HWCAP_ADVSIMD;
-#ifdef HWCAP2_BF16
-    if (hwcap & HWCAP2_BF16)
+
+#ifdef AT_HWCAP2
+    const unsigned long hwcap2 = getauxval(AT_HWCAP2);
+    if (hwcap2 & HWCAP2_BF16)
       type_ |= (Type)XBYAK_AARCH64_HWCAP_BF16;
 #endif
 
@@ -421,7 +429,26 @@ private:
     numCores_[0] = numCores_[1] = sysconf(_SC_NPROCESSORS_ONLN);
   }
 
-  void setSysRegVal() { XBYAK_AARCH64_READ_SYSREG(cacheInfo_.midr_el1, MIDR_EL1); }
+  void setSysRegVal() {
+    /* Some Linux does not permit to access MIDR_EL1 register
+       from user program. The register value is disclosed
+       in /sys/devices/system/cpu/cpu?/regs/identification/midr_el1 */
+    char buf[64];
+    char *stop;
+
+    FILE *file = fopen(path_midr_el1, "r");
+    if (file == nullptr) {
+      throw Error(ERR_INTERNAL);
+      return;
+    }
+
+    if (fread(buf, sizeof(char), 64, file) == 0) {
+      throw Error(ERR_INTERNAL);
+      return;
+    }
+
+    cacheInfo_.midr_el1 = strtoull(buf, &stop, 16);
+  }
 };
 
 #undef XBYAK_AARCH64_ERROR_
