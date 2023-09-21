@@ -410,6 +410,7 @@ protected:
         CHECK(_pd->init(engine));
         CHECK(_pd->init_scratchpad_md());
         *pd = _pd.release();
+        DNNL_PRIMITIVE_CREATE(pd_t);
         return success;
     }
 
